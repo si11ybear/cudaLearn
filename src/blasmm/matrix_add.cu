@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <cuda_runtime.h>
 
 // CUDA Kernel function to add elements of two arrays
 __global__ void matrix_add_ker(int *a, int *b, int *c, int width, int height) {
@@ -44,7 +45,34 @@ void matrix_add(const int* h_a, const int* h_b, int* h_c, int width, int height)
     dim3 threadsPerBlock(16, 16);
     dim3 blocksPerGrid((width + threadsPerBlock.x - 1) / threadsPerBlock.x,
                        (height + threadsPerBlock.y - 1) / threadsPerBlock.y);
+    
+    // Time
+    cudaEvent_t start, stop;
+    cudaEventCreate(&start);
+    cudaEventCreate(&stop);
+    cudaEventRecord(start, 0);
+   
     matrix_add_ker<<<blocksPerGrid, threadsPerBlock>>>(d_a, d_b, d_c, width, height);
+
+    // Time
+    cudaEventRecord(stop, 0);
+    cudaEventSynchronize(stop);
+    float milliseconds = 0;
+    cudaEventElapsedTime(&milliseconds, start, stop);
+
+    // Performance metrics
+    // 1. Time
+    printf("Time for matrix addition: %f ms\n", milliseconds);
+
+    // 2. FLOPS (Matrix Add: 1 addition per element)
+    int flops = width * height;  // Each element involves 1 addition
+    float flops_per_second = (flops / (milliseconds / 1000.0f)) / 1e9;  // Convert to GFLOPS
+    printf("Performance: %f GFLOPS\n", flops_per_second);
+
+    // 3. Bandwidth (Memory bound calculation)
+    // We are reading two matrices (a, b) and writing one matrix (c)
+    float bandwidth = (3.0f * size / (milliseconds / 1000.0f)) / (1 << 30);  // GB/s
+    printf("Memory Bandwidth: %f GB/s\n", bandwidth);
 
     // Copy result back to host
     cudaMemcpy(h_c, d_c, size, cudaMemcpyDeviceToHost);
