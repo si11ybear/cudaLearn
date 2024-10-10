@@ -1,0 +1,20 @@
+# Build directories
+/build/
+
+/bin/
+
+# Object files
+*.o
+*.obj
+
+# Executable files
+*.exe
+*.out
+*.a
+*.so
+
+# IDE configurations
+.vscode/
+.idea/s
+# Log files
+*.log
