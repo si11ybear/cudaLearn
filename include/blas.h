@@ -1,10 +1,15 @@
 #ifndef BLAS_H
 #define BLAS_H
 
+//blasmm
 #include "blasmm/matrix_add.h"
 #include "blasmm/matrix_t.h"
-#include "blasvv/vector_add.h"
+#include "blasmm/gemm.h"
 
-// 其他的算子头文件可以继续添加...
+//blasvm
+#include "blasvm/gemv.h"
+
+//blasvv
+#include "blasvv/vector_add.h"
 
 #endif  // BLAS_H

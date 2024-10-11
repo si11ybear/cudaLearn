@@ -31,9 +31,11 @@ target_include_directories(blasvm PUBLIC include/blasvm)
 
 # 创建一个可执行文件 main_exe
 add_executable(main_exec main.cpp)
+add_executable(test.exe src/test.cpp)
 
 # 将库链接到 main_exec 可执行文件中
 target_link_libraries(main_exec blasmm blasvv blasvm)
+target_link_libraries(test.exe blasmm blasvv blasvm)
 
 # 为调试目的启用详细的 Makefile 输出（可选）
 # set(CMAKE_VERBOSE_MAKEFILE ON)
