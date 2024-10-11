@@ -15,9 +15,9 @@ include_directories(include)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/bin)
 
 # 自动搜索 目录下的所有 .cu 文件
-file(GLOB SRC_BLASMM src/blasmm/*.cu)
-file(GLOB SRC_BLASVV src/blasvv/*.cu)
-file(GLOB SRC_BLASVM src/blasvm/*.cu)
+file(GLOB SRC_BLASMM src/blasmm/*)
+file(GLOB SRC_BLASVV src/blasvv/*)
+file(GLOB SRC_BLASVM src/blasvm/*)
 
 # 创建静态库（blasmm），包含所有 blasmm 目录下的 .cu 文件，设置头文件路径
 add_library(blasmm STATIC ${SRC_BLASMM})
