@@ -11,11 +11,6 @@ set(CMAKE_CUDA_STANDARD 11)
 # 包含头文件的目录（即 include 文件夹路径）
 include_directories(include)
 
-# # 自动检测并选择 CUDA 架构
-# include(FindCUDA/select_compute_arch)
-# CUDA_SELECT_NVCC_ARCH_FLAGS(NVCC_ARCH_FLAGS)
-# set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} ${NVCC_ARCH_FLAGS}")
-
 # 设置可执行文件输出路径为项目根目录下的 bin/ 目录
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/bin)
 
@@ -31,21 +26,14 @@ target_include_directories(blasmm PUBLIC include/blasmm)
 add_library(blasvv STATIC ${SRC_BLASVV})
 target_include_directories(blasvv PUBLIC include/blasvv)
 
-if(SRC_BLASVM)
-    add_library(blasvm STATIC ${SRC_BLASVM})
-    target_include_directories(blasvm PUBLIC include/blasvm)
-endif()
+add_library(blasvm STATIC ${SRC_BLASVM})
+target_include_directories(blasvm PUBLIC include/blasvm)
 
-# 创建一个可执行文件 main_exec，示例程序将链接 blasmm 和 blasvv 库
+# 创建一个可执行文件 main_exe
 add_executable(main_exec main.cpp)
 
-# 将 blasmm 和 blasvv 库链接到 main_exec 可执行文件中
-target_link_libraries(main_exec blasmm blasvv)
-
-# 如果 blasvm 库存在，则链接到 main_exec
-if(TARGET blasvm)
-    target_link_libraries(main_exec blasvm)
-endif()
+# 将库链接到 main_exec 可执行文件中
+target_link_libraries(main_exec blasmm blasvv blasvm)
 
 # 为调试目的启用详细的 Makefile 输出（可选）
 # set(CMAKE_VERBOSE_MAKEFILE ON)

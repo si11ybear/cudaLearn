@@ -59,7 +59,7 @@ int main() {
 
     // 输出转置结果
     std::cout << "Matrix A Td:" << std::endl;
-    print_matrix(h_t, width, height);
+    print_matrix(h_t, height, width);
 
     // 释放主机上的矩阵内存
     delete[] h_a;
