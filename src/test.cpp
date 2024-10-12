@@ -16,6 +16,7 @@ bool verify_results(const float* h_ref, const float* h_res, int n);
 //验证正确性并进行性能对比
 void test_vector_add(int n);
 void test_matrix_add(int width, int height);
+void test_gemm(int A_rows, int A_cols, int B_cols);
 void test_matrix_transpose(int width, int height);
 
 // 主函数：允许选择要测试的算子
@@ -28,7 +29,7 @@ int main(int argc, char* argv[]) {
     std::string operation = argv[1];
 
     if (operation == "vector_add") {
-        int n = 100;
+        int n = 1000000;
         if (argc !=4) std::cout << "Using default size " << n << std::endl;
         else if(std::string(argv[2]) == "--size") {
             n = std::atoi(argv[3]);
@@ -54,6 +55,18 @@ int main(int argc, char* argv[]) {
             height = std::atoi(argv[4]);
         }
         test_matrix_transpose(width, height);
+    }
+    else if (operation == "gemm") {
+        int A_rows = 1024;
+        int A_cols = 1024;
+        int B_cols = 1024;
+        if (argc !=6) std::cout << "Using default size 1024 * 1024" << std::endl;
+        else if (std::string(argv[2]) == "--matrix-size") {
+            A_rows = std::atoi(argv[3]);
+            A_cols = std::atoi(argv[4]);
+            B_cols = std::atoi(argv[5]);
+        }
+        test_gemm(A_rows, A_cols, B_cols);
     }
     else {
         std::cout << "Unknown operation: " << operation << "\n";
@@ -90,7 +103,7 @@ void test_vector_add(int n) {
         h_ref[i] = h_b[i];  // CUBLAS的y值初始化
     }
 
-    // 使用 cblas_saxpy 执行向量加法 y = a * x + y
+    // 使用 cublas_saxpy 执行向量加法 y = a * x + y
     // 这里 a = 1.0， y = h_b, x = h_a
     auto start_cublas = std::chrono::high_resolution_clock::now();
     cublasHandle_t handle;
@@ -109,16 +122,17 @@ void test_vector_add(int n) {
         std::cerr << "CUBLAS failed!" << status << std::endl;
         exit(EXIT_FAILURE);
     }
+    else std::cout << "Final success!" << std::endl;
     cublasGetVector(n, sizeof(DATATYPE), d_ref, 1, h_ref, 1);
     cublasDestroy(handle);
     cudaFree(d_a);
     cudaFree(d_ref);
     auto end_cublas = std::chrono::high_resolution_clock::now();
-    print_performance("CUBLAS Vector Addition (CPU)", end_cublas - start_cublas);
+    print_performance("CUBLAS Vector Addition", end_cublas - start_cublas);
 
     // 调用自定义 CUDA 向量加法函数
     auto start_cuda = std::chrono::high_resolution_clock::now();
-    vector_add<DATATYPE>(h_a, alpha, h_b, n);  // 我的 CUDA 实现
+    vector_add<float>(h_a, alpha, h_b, n);  // 我的 CUDA 实现
     auto end_cuda = std::chrono::high_resolution_clock::now();
     print_performance("My CUDA Vector Addition", end_cuda - start_cuda);
 
@@ -127,6 +141,73 @@ void test_vector_add(int n) {
         std::cout << "CUDA vector addition is correct!" << std::endl;
     } else {
         std::cout << "CUDA vector addition has errors!" << std::endl;
+    }
+
+    // // 清理内存
+    free(h_a);
+    free(h_b);
+    free(h_ref);
+}
+
+void test_gemm(int A_rows, int A_cols, int B_cols) {
+    int size_A = A_cols * A_rows;
+    int size_B = A_cols * B_cols;
+    int size_C = A_rows * B_cols;
+    DATATYPE* h_a = (DATATYPE*)malloc(size_A * sizeof(DATATYPE));
+    DATATYPE* h_b = (DATATYPE*)malloc(size_B * sizeof(DATATYPE));
+    DATATYPE* h_c = (DATATYPE*)malloc(size_C * sizeof(DATATYPE));   // 自写算子 CUDA 结果
+    DATATYPE* h_ref = (DATATYPE*)malloc(size_C * sizeof(DATATYPE)); // 参考结果
+    DATATYPE alpha = static_cast<DATATYPE>(rand()) / RAND_MAX;
+    DATATYPE beta = static_cast<DATATYPE>(rand()) / RAND_MAX;
+
+    // 初始化向量
+    for (int i = 0; i < size_A; ++i) h_a[i] = static_cast<DATATYPE>(rand()) / RAND_MAX;
+    for (int i = 0; i < size_B; ++i) h_b[i] = static_cast<DATATYPE>(rand()) / RAND_MAX;
+    for (int i = 0; i < size_C; ++i) {
+        h_c[i] = static_cast<DATATYPE>(rand()) / RAND_MAX;
+        h_ref[i] = h_c[i];  // CUBLAS的y值初始化
+    }
+
+    // 使用 cublas
+    // 这里 a = 1.0， y = h_b, x = h_a
+    auto start_cublas = std::chrono::high_resolution_clock::now();
+    cublasHandle_t handle;
+    cublasCreate(&handle);
+    DATATYPE *d_a, *d_b, *d_ref;
+    cudaMalloc((void**)&d_a, size_A * sizeof(DATATYPE));
+    cudaMalloc((void**)&d_ref, size_B * sizeof(DATATYPE));
+    cublasSetVector(size_A, sizeof(DATATYPE), h_a, 1, d_a, 1); // H2D host to device
+    cublasSetVector(size_B, sizeof(DATATYPE), h_b, 1, d_b, 1);
+    cublasSetVector(size_C, sizeof(DATATYPE), h_ref, 1, d_ref, 1);
+    #ifdef DATATYPE
+    cublasStatus_t status = cublasSgemm_v2(handle, CUBLAS_OP_N, CUBLAS_OP_N, A_rows, A_cols, B_cols, &alpha, d_a, A_rows, d_b, A_cols, &beta, d_ref, A_rows);// h_ref = alpha * h_a + h_b
+    #else
+    cublasStatus_t status = cublasDgemm_v2(handle, CUBLAS_OP_N, CUBLAS_OP_N, A_rows, A_cols, B_cols, &alpha, d_a, A_rows, d_b, A_cols, &beta, d_ref, A_rows);// h_ref = alpha * h_a + h_b
+    #endif
+    if (status != CUBLAS_STATUS_SUCCESS) {
+        std::cerr << "CUBLAS failed!" << status << std::endl;
+        exit(EXIT_FAILURE);
+    }
+    else std::cout << "Final success!" << std::endl;
+    cublasGetVector(size_C, sizeof(DATATYPE), d_ref, 1, h_ref, 1);
+    cublasDestroy(handle);
+    cudaFree(d_a);
+    cudaFree(d_b);
+    cudaFree(d_ref);
+    auto end_cublas = std::chrono::high_resolution_clock::now();
+    print_performance("CUBLAS gemm", end_cublas - start_cublas);
+
+    // 调用自定义 CUDA 向量加法函数
+    auto start_cuda = std::chrono::high_resolution_clock::now();
+    gemm<DATATYPE>(h_a, h_b, h_c, alpha, beta, A_rows, A_cols, B_cols);  // 我的 CUDA 实现
+    auto end_cuda = std::chrono::high_resolution_clock::now();
+    print_performance("My CUDA gemm", end_cuda - start_cuda);
+
+    // 验证 CUDA 结果是否与 CBLAS 结果匹配
+    if (verify_results(h_ref, h_c, size_C)) {
+        std::cout << "CUDA gemm is correct!" << std::endl;
+    } else {
+        std::cout << "CUDA gemm has errors!" << std::endl;
     }
 
     // // 清理内存

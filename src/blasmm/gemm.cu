@@ -27,6 +27,7 @@ void gemm(const T *h_A, const T *h_B, T *h_C, T alpha, T beta, int A_rows, int A
 
     // Device memory pointers
     T *d_A, *d_B, *d_C;
+    printf("here\n");
 
     // Allocate memory on the device (GPU)
     cudaMalloc((void **)&d_A, size_A);
@@ -72,3 +73,6 @@ void gemm(const T *h_A, const T *h_B, T *h_C, T alpha, T beta, int A_rows, int A
     cudaEventDestroy(start);
     cudaEventDestroy(stop);
 }
+
+template void gemm<float>(const float *h_A, const float *h_B, float *h_C, float alpha, float beta, int A_rows, int A_cols, int B_cols);
+template void gemm<double>(const double *h_A, const double *h_B, double *h_C, double alpha, double beta, int A_rows, int A_cols, int B_cols);
