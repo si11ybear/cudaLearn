@@ -1,6 +1,7 @@
 # Build directories
 /build/
-
+/test/build/
+/test/CMakeFiles
 /bin/
 
 # Object files
