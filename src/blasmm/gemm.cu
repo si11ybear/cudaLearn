@@ -27,7 +27,7 @@ void gemm(const T *h_A, const T *h_B, T *h_C, T alpha, T beta, int A_rows, int A
 
     // Device memory pointers
     T *d_A, *d_B, *d_C;
-    printf("here\n");
+    printf("hereadf\n");
 
     // Allocate memory on the device (GPU)
     cudaMalloc((void **)&d_A, size_A);

@@ -15,9 +15,9 @@ bool verify_results(const float* h_ref, const float* h_res, int n);
 
 //验证正确性并进行性能对比
 void test_vector_add(int n);
-void test_matrix_add(int width, int height);
+// void test_matrix_add(int width, int height);
 void test_gemm(int A_rows, int A_cols, int B_cols);
-void test_matrix_transpose(int width, int height);
+// void test_matrix_transpose(int width, int height);
 
 // 主函数：允许选择要测试的算子
 int main(int argc, char* argv[]) {
@@ -29,33 +29,33 @@ int main(int argc, char* argv[]) {
     std::string operation = argv[1];
 
     if (operation == "vector_add") {
-        int n = 1000000;
+        int n = 10;
         if (argc !=4) std::cout << "Using default size " << n << std::endl;
         else if(std::string(argv[2]) == "--size") {
             n = std::atoi(argv[3]);
         }
         test_vector_add(n);
     }
-    else if (operation == "matrix_add") {
-        int width = 1024;
-        int height = 1024;
-        if (argc !=5) std::cout << "Using default size 1024 * 1024" << std::endl;
-        else if (std::string(argv[2]) == "--matrix-size") {
-            width = std::atoi(argv[3]);
-            height = std::atoi(argv[4]);
-        }
-        test_matrix_add(width, height);
-    }
-    else if (operation == "matrix_transpose") {
-        int width = 1024;
-        int height = 1024;
-        if (argc !=5) std::cout << "Using default size 1024 * 1024" << std::endl;
-        else if (std::string(argv[2]) == "--matrix-size") {
-            width = std::atoi(argv[3]);
-            height = std::atoi(argv[4]);
-        }
-        test_matrix_transpose(width, height);
-    }
+    // else if (operation == "matrix_add") {
+    //     int width = 1024;
+    //     int height = 1024;
+    //     if (argc !=5) std::cout << "Using default size 1024 * 1024" << std::endl;
+    //     else if (std::string(argv[2]) == "--matrix-size") {
+    //         width = std::atoi(argv[3]);
+    //         height = std::atoi(argv[4]);
+    //     }
+    //     test_matrix_add(width, height);
+    // }
+    // else if (operation == "matrix_transpose") {
+    //     int width = 1024;
+    //     int height = 1024;
+    //     if (argc !=5) std::cout << "Using default size 1024 * 1024" << std::endl;
+    //     else if (std::string(argv[2]) == "--matrix-size") {
+    //         width = std::atoi(argv[3]);
+    //         height = std::atoi(argv[4]);
+    //     }
+    //     test_matrix_transpose(width, height);
+    // }
     else if (operation == "gemm") {
         int A_rows = 1024;
         int A_cols = 1024;
@@ -85,6 +85,12 @@ void print_help() {
     std::cout << "  matrix_transpose: Test matrix transpose\n";
 }
 
+void print_vm(float *A, int size) {
+    for(int i = 0; i < size; i++)
+        printf("%f",A[i]);
+    printf("\n");
+}
+
 // 打印性能
 void print_performance(const std::string& operation, std::chrono::duration<double> duration) {
     std::cout << operation << " took: " << duration.count() * 1000 << " ms" << std::endl;
@@ -96,13 +102,14 @@ void test_vector_add(int n) {
     DATATYPE* h_b = (DATATYPE*)malloc(n * sizeof(DATATYPE));   // 自写算子 CUDA 结果
     DATATYPE* h_ref = (DATATYPE*)malloc(n * sizeof(DATATYPE)); // 参考结果
     DATATYPE alpha = static_cast<DATATYPE>(rand()) / RAND_MAX;
+    alpha = 1;
     // 初始化向量
     for (int i = 0; i < n; ++i) {
         h_a[i] = static_cast<DATATYPE>(rand()) / RAND_MAX;
         h_b[i] = static_cast<DATATYPE>(rand()) / RAND_MAX;
         h_ref[i] = h_b[i];  // CUBLAS的y值初始化
     }
-
+    // print_vm(h_b, n);
     // 使用 cublas_saxpy 执行向量加法 y = a * x + y
     // 这里 a = 1.0， y = h_b, x = h_a
     auto start_cublas = std::chrono::high_resolution_clock::now();
@@ -142,13 +149,18 @@ void test_vector_add(int n) {
     } else {
         std::cout << "CUDA vector addition has errors!" << std::endl;
     }
-
+    // printf("%f\n", alpha);
+    // print_vm(h_a, n);
+    // print_vm(h_b, n);
+    // print_vm(h_ref, n);
     // // 清理内存
     free(h_a);
     free(h_b);
     free(h_ref);
 }
 
+
+// gemm 性能测试
 void test_gemm(int A_rows, int A_cols, int B_cols) {
     int size_A = A_cols * A_rows;
     int size_B = A_cols * B_cols;
@@ -216,48 +228,48 @@ void test_gemm(int A_rows, int A_cols, int B_cols) {
     free(h_ref);
 }
 
-// 矩阵加法的 CUBLAS 性能测试
-void test_matrix_add(int width, int height) {
-    return;
-    // int n = width * height;
-    // float* h_a = (float*)malloc(n * sizeof(DATATYPE));
-    // float* h_b = (float*)malloc(n * sizeof(DATATYPE));
-    // float* h_c = (float*)malloc(n * sizeof(DATATYPE));
+// // 矩阵加法的 CUBLAS 性能测试
+// void test_matrix_add(int width, int height) {
+//     return;
+//     // int n = width * height;
+//     // float* h_a = (float*)malloc(n * sizeof(DATATYPE));
+//     // float* h_b = (float*)malloc(n * sizeof(DATATYPE));
+//     // float* h_c = (float*)malloc(n * sizeof(DATATYPE));
 
-    // for (int i = 0; i < n; ++i) {
-    //     h_a[i] = static_cast<float>(rand()) / RAND_MAX;
-    //     h_b[i] = static_cast<float>(rand()) / RAND_MAX;
-    // }
+//     // for (int i = 0; i < n; ++i) {
+//     //     h_a[i] = static_cast<float>(rand()) / RAND_MAX;
+//     //     h_b[i] = static_cast<float>(rand()) / RAND_MAX;
+//     // }
 
-    // auto start = std::chrono::high_resolution_clock::now();
-    // test_matrix_add(h_a, h_b, h_c, width, height);
-    // auto end = std::chrono::high_resolution_clock::now();
-    // print_performance("CUBLAS Matrix Addition", end - start);
+//     // auto start = std::chrono::high_resolution_clock::now();
+//     // test_matrix_add(h_a, h_b, h_c, width, height);
+//     // auto end = std::chrono::high_resolution_clock::now();
+//     // print_performance("CUBLAS Matrix Addition", end - start);
 
-    // free(h_a);
-    // free(h_b);
-    // free(h_c);
-}
+//     // free(h_a);
+//     // free(h_b);
+//     // free(h_c);
+// }
 
-// 矩阵转置的 CUBLAS 性能测试
-void test_matrix_transpose(int width, int height) {
-    return;
-    // int n = width * height;
-    // float* h_a = (float*)malloc(n * sizeof(DATATYPE));
-    // float* h_t = (float*)malloc(n * sizeof(DATATYPE));
+// // 矩阵转置的 CUBLAS 性能测试
+// void test_matrix_transpose(int width, int height) {
+//     return;
+//     // int n = width * height;
+//     // float* h_a = (float*)malloc(n * sizeof(DATATYPE));
+//     // float* h_t = (float*)malloc(n * sizeof(DATATYPE));
 
-    // for (int i = 0; i < n; ++i) {
-    //     h_a[i] = static_cast<float>(rand()) / RAND_MAX;
-    // }
+//     // for (int i = 0; i < n; ++i) {
+//     //     h_a[i] = static_cast<float>(rand()) / RAND_MAX;
+//     // }
 
-    // auto start = std::chrono::high_resolution_clock::now();
-    // test_matrix_transpose(h_a, h_t, width, height);
-    // auto end = std::chrono::high_resolution_clock::now();
-    // print_performance("CUBLAS Matrix Transpose", end - start);
+//     // auto start = std::chrono::high_resolution_clock::now();
+//     // test_matrix_transpose(h_a, h_t, width, height);
+//     // auto end = std::chrono::high_resolution_clock::now();
+//     // print_performance("CUBLAS Matrix Transpose", end - start);
 
-    // free(h_a);
-    // free(h_t);
-}
+//     // free(h_a);
+//     // free(h_t);
+// }
 
 // 辅助函数，用于验证两个向量结果的正确性
 bool verify_results(const float* h_ref, const float* h_res, int n) {
