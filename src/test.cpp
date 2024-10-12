@@ -1,246 +1,190 @@
 #include <iostream>
-#include <cstring>
-#include <chrono>
+#include <cstdlib>
 #include <ctime>
-#include "blas.h"  // 统一头文件
+#include <chrono>
+#include <cmath>
+#include <cublas_v2.h>   // CUBLAS 库
+#include <cuda_runtime.h>
+#include "blas.h"        // 统一头文件，包含自定义的 CUDA 算子
+
+#define DATATYPE float
+
+void print_help();
+void print_performance(const std::string& operation, std::chrono::duration<double> duration);
+bool verify_results(const float* h_ref, const float* h_res, int n);
+
+//验证正确性并进行性能对比
+void test_vector_add(int n);
+void test_matrix_add(int width, int height);
+void test_matrix_transpose(int width, int height);
+
+// 主函数：允许选择要测试的算子
+int main(int argc, char* argv[]) {
+    if (argc < 2) {
+        print_help();
+        return 1;
+    }
+
+    std::string operation = argv[1];
+
+    if (operation == "vector_add") {
+        int n = 100;
+        if (argc !=4) std::cout << "Using default size " << n << std::endl;
+        else if(std::string(argv[2]) == "--size") {
+            n = std::atoi(argv[3]);
+        }
+        test_vector_add(n);
+    }
+    else if (operation == "matrix_add") {
+        int width = 1024;
+        int height = 1024;
+        if (argc !=5) std::cout << "Using default size 1024 * 1024" << std::endl;
+        else if (std::string(argv[2]) == "--matrix-size") {
+            width = std::atoi(argv[3]);
+            height = std::atoi(argv[4]);
+        }
+        test_matrix_add(width, height);
+    }
+    else if (operation == "matrix_transpose") {
+        int width = 1024;
+        int height = 1024;
+        if (argc !=5) std::cout << "Using default size 1024 * 1024" << std::endl;
+        else if (std::string(argv[2]) == "--matrix-size") {
+            width = std::atoi(argv[3]);
+            height = std::atoi(argv[4]);
+        }
+        test_matrix_transpose(width, height);
+    }
+    else {
+        std::cout << "Unknown operation: " << operation << "\n";
+        return 1;
+    }
+
+    return 0;
+}
 
 // 打印帮助信息
 void print_help() {
-    std::cout << "Usage: ./main_exec --op <operation> [--size <size>] [--width <width>] [--height <height>]\n";
+    std::cout << "Usage: ./test.exe <operation> --size <n> or --matrix-size <width> <height>\n";
     std::cout << "Operations:\n";
     std::cout << "  vector_add: Test vector addition\n";
     std::cout << "  matrix_add: Test matrix addition\n";
     std::cout << "  matrix_transpose: Test matrix transpose\n";
 }
 
-// 用于 CPU 的向量加法
-void vector_add_cpu(const int* a, const int* b, int* c, int n) {
-    for (int i = 0; i < n; ++i) {
-        c[i] = a[i] + b[i];
-    }
+// 打印性能
+void print_performance(const std::string& operation, std::chrono::duration<double> duration) {
+    std::cout << operation << " took: " << duration.count() * 1000 << " ms" << std::endl;
 }
 
-// 用于 CPU 的矩阵加法，用于对比 GPU 结果
-void matrix_add_cpu(const int* a, const int* b, int* c, int width, int height) {
-    for (int row = 0; row < height; row++) {
-        for (int col = 0; col < width; col++) {
-            int index = row * width + col;
-            c[index] = a[index] + b[index];
-        }
-    }
-}
-
-// 用于 CPU 的矩阵转置，用于对比 GPU 结果
-void matrix_transpose_cpu(const int* input, int* output, int width, int height) {
-    for (int row = 0; row < height; row++) {
-        for (int col = 0; col < width; col++) {
-            int input_index = row * width + col;
-            int output_index = col * height + row;
-            output[output_index] = input[input_index];
-        }
-    }
-}
-
-// 随机生成矩阵
-void generate_random_matrix(int* mat, int width, int height) {
-    for (int i = 0; i < width * height; ++i) {
-        mat[i] = rand() % 100;  // 随机生成 0-99 范围的整数
-    }
-}
-
-// 随机生成向量
-void generate_random_vector(int* vec, int n) {
-    for (int i = 0; i < n; ++i) {
-        vec[i] = rand() % 100;
-    }
-}
-
-// 测试向量加法的性能与正确性
+// 向量加法的 CUBLAS 性能测试
 void test_vector_add(int n) {
-    int* h_a = (int*)malloc(n * sizeof(int));
-    int* h_b = (int*)malloc(n * sizeof(int));
-    int* h_c_cpu = (int*)malloc(n * sizeof(int));
-    int* h_c_gpu = (int*)malloc(n * sizeof(int));
-
-    generate_random_vector(h_a, n);
-    generate_random_vector(h_b, n);
-
-    // CPU 计算向量加法
-    vector_add_cpu(h_a, h_b, h_c_cpu, n);
-
-    // 测试 GPU 向量加法性能
-    auto start = std::chrono::high_resolution_clock::now();
-    vector_add(h_a, h_b, h_c_gpu, n);  // GPU 向量加法
-    auto end = std::chrono::high_resolution_clock::now();
-    
-    std::chrono::duration<double> elapsed = end - start;
-    std::cout << "GPU Vector Addition took: " << elapsed.count() << " seconds.\n";
-
-    // 检查结果正确性
-    bool correct = true;
+    DATATYPE* h_a = (DATATYPE*)malloc(n * sizeof(DATATYPE));
+    DATATYPE* h_b = (DATATYPE*)malloc(n * sizeof(DATATYPE));   // 自写算子 CUDA 结果
+    DATATYPE* h_ref = (DATATYPE*)malloc(n * sizeof(DATATYPE)); // 参考结果
+    DATATYPE alpha = static_cast<DATATYPE>(rand()) / RAND_MAX;
+    // 初始化向量
     for (int i = 0; i < n; ++i) {
-        if (h_c_cpu[i] != h_c_gpu[i]) {
-            correct = false;
-            std::cout << "Mismatch at index " << i << ": CPU=" << h_c_cpu[i] << ", GPU=" << h_c_gpu[i] << "\n";
-            break;
-        }
+        h_a[i] = static_cast<DATATYPE>(rand()) / RAND_MAX;
+        h_b[i] = static_cast<DATATYPE>(rand()) / RAND_MAX;
+        h_ref[i] = h_b[i];  // CUBLAS的y值初始化
     }
 
-    if (correct) {
-        std::cout << "Vector addition result is correct.\n";
+    // 使用 cblas_saxpy 执行向量加法 y = a * x + y
+    // 这里 a = 1.0， y = h_b, x = h_a
+    auto start_cublas = std::chrono::high_resolution_clock::now();
+    cublasHandle_t handle;
+    cublasCreate(&handle);
+    DATATYPE *d_a, *d_ref;
+    cudaMalloc((void**)&d_a, n * sizeof(DATATYPE));
+    cudaMalloc((void**)&d_ref, n * sizeof(DATATYPE));
+    cublasSetVector(n, sizeof(DATATYPE), h_a, 1, d_a, 1); // H2D host to device
+    cublasSetVector(n, sizeof(DATATYPE), h_ref, 1, d_ref, 1);
+    #ifdef DATATYPE
+    cublasStatus_t status = cublasSaxpy(handle, n, &alpha, d_a, 1, d_ref, 1);// h_ref = alpha * h_a + h_b
+    #else
+    cublasStatus_t status = cublasDaxpy(handle, n, &alpha, d_a, 1, d_ref, 1);// h_ref = alpha * h_a + h_b
+    #endif
+    if (status != CUBLAS_STATUS_SUCCESS) {
+        std::cerr << "CUBLAS failed!" << status << std::endl;
+        exit(EXIT_FAILURE);
+    }
+    cublasGetVector(n, sizeof(DATATYPE), d_ref, 1, h_ref, 1);
+    cublasDestroy(handle);
+    cudaFree(d_a);
+    cudaFree(d_ref);
+    auto end_cublas = std::chrono::high_resolution_clock::now();
+    print_performance("CUBLAS Vector Addition (CPU)", end_cublas - start_cublas);
+
+    // 调用自定义 CUDA 向量加法函数
+    auto start_cuda = std::chrono::high_resolution_clock::now();
+    vector_add<DATATYPE>(h_a, alpha, h_b, n);  // 我的 CUDA 实现
+    auto end_cuda = std::chrono::high_resolution_clock::now();
+    print_performance("My CUDA Vector Addition", end_cuda - start_cuda);
+
+    // 验证 CUDA 结果是否与 CBLAS 结果匹配
+    if (verify_results(h_ref, h_b, n)) {
+        std::cout << "CUDA vector addition is correct!" << std::endl;
     } else {
-        std::cout << "Vector addition result is incorrect.\n";
+        std::cout << "CUDA vector addition has errors!" << std::endl;
     }
 
-    // 释放内存
+    // // 清理内存
     free(h_a);
     free(h_b);
-    free(h_c_cpu);
-    free(h_c_gpu);
+    free(h_ref);
 }
 
-// 测试矩阵加法的性能与正确性
+// 矩阵加法的 CUBLAS 性能测试
 void test_matrix_add(int width, int height) {
-    int size = width * height;
-    
-    // 分配矩阵内存
-    int* h_a = (int*)malloc(size * sizeof(int));
-    int* h_b = (int*)malloc(size * sizeof(int));
-    int* h_c_cpu = (int*)malloc(size * sizeof(int));  // CPU 结果
-    int* h_c_gpu = (int*)malloc(size * sizeof(int));  // GPU 结果
+    return;
+    // int n = width * height;
+    // float* h_a = (float*)malloc(n * sizeof(DATATYPE));
+    // float* h_b = (float*)malloc(n * sizeof(DATATYPE));
+    // float* h_c = (float*)malloc(n * sizeof(DATATYPE));
 
-    generate_random_matrix(h_a, width, height);
-    generate_random_matrix(h_b, width, height);
+    // for (int i = 0; i < n; ++i) {
+    //     h_a[i] = static_cast<float>(rand()) / RAND_MAX;
+    //     h_b[i] = static_cast<float>(rand()) / RAND_MAX;
+    // }
 
-    // CPU 测试矩阵加法正确性
-    matrix_add_cpu(h_a, h_b, h_c_cpu, width, height);
+    // auto start = std::chrono::high_resolution_clock::now();
+    // test_matrix_add(h_a, h_b, h_c, width, height);
+    // auto end = std::chrono::high_resolution_clock::now();
+    // print_performance("CUBLAS Matrix Addition", end - start);
 
-    // 测试 GPU 性能
-    auto start = std::chrono::high_resolution_clock::now();
-    matrix_add(h_a, h_b, h_c_gpu, width, height);  // GPU 矩阵加法
-    auto end = std::chrono::high_resolution_clock::now();
-    
-    // 计算执行时间
-    std::chrono::duration<double> elapsed = end - start;
-    std::cout << "GPU Matrix Addition took: " << elapsed.count() << " seconds.\n";
-
-    // 检查 GPU 结果的正确性
-    bool correct = true;
-    for (int i = 0; i < size; ++i) {
-        if (h_c_cpu[i] != h_c_gpu[i]) {
-            correct = false;
-            std::cout << "Mismatch at index " << i << ": CPU=" << h_c_cpu[i] << ", GPU=" << h_c_gpu[i] << "\n";
-            break;
-        }
-    }
-
-    if (correct) {
-        std::cout << "Matrix addition result is correct.\n";
-    } else {
-        std::cout << "Matrix addition result is incorrect.\n";
-    }
-
-    // 释放内存
-    free(h_a);
-    free(h_b);
-    free(h_c_cpu);
-    free(h_c_gpu);
+    // free(h_a);
+    // free(h_b);
+    // free(h_c);
 }
 
-// 测试矩阵转置的性能与正确性
+// 矩阵转置的 CUBLAS 性能测试
 void test_matrix_transpose(int width, int height) {
-    int size = width * height;
-    
-    // 分配矩阵内存
-    int* h_input = (int*)malloc(size * sizeof(int));
-    int* h_output_cpu = (int*)malloc(size * sizeof(int));  // CPU 结果
-    int* h_output_gpu = (int*)malloc(size * sizeof(int));  // GPU 结果
+    return;
+    // int n = width * height;
+    // float* h_a = (float*)malloc(n * sizeof(DATATYPE));
+    // float* h_t = (float*)malloc(n * sizeof(DATATYPE));
 
-    generate_random_matrix(h_input, width, height);
+    // for (int i = 0; i < n; ++i) {
+    //     h_a[i] = static_cast<float>(rand()) / RAND_MAX;
+    // }
 
-    // CPU 测试矩阵转置
-    matrix_transpose_cpu(h_input, h_output_cpu, width, height);
+    // auto start = std::chrono::high_resolution_clock::now();
+    // test_matrix_transpose(h_a, h_t, width, height);
+    // auto end = std::chrono::high_resolution_clock::now();
+    // print_performance("CUBLAS Matrix Transpose", end - start);
 
-    // 测试 GPU 性能
-    auto start = std::chrono::high_resolution_clock::now();
-    matrix_T(h_input, h_output_gpu, width, height);  // GPU 矩阵转置
-    auto end = std::chrono::high_resolution_clock::now();
-    
-    // 计算执行时间
-    std::chrono::duration<double> elapsed = end - start;
-    std::cout << "GPU Matrix Transpose took: " << elapsed.count() << " seconds.\n";
-
-    // 检查 GPU 结果的正确性
-    bool correct = true;
-    for (int i = 0; i < size; ++i) {
-        if (h_output_cpu[i] != h_output_gpu[i]) {
-            correct = false;
-            std::cout << "Mismatch at index " << i << ": CPU=" << h_output_cpu[i] << ", GPU=" << h_output_gpu[i] << "\n";
-            break;
-        }
-    }
-
-    if (correct) {
-        std::cout << "Matrix transpose result is correct.\n";
-    } else {
-        std::cout << "Matrix transpose result is incorrect.\n";
-    }
-
-    // 释放内存
-    free(h_input);
-    free(h_output_cpu);
-    free(h_output_gpu);
+    // free(h_a);
+    // free(h_t);
 }
 
-// 解析命令行参数并运行相应的测试
-int main(int argc, char* argv[]) {
-    if (argc < 3) {
-        print_help();
-        return 1;
-    }
-
-    std::string op = "";
-    int size = 0, width = 0, height = 0;
-
-    // 解析命令行参数
-    for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "--op") == 0) {
-            op = argv[++i];  // 获取操作类型
-        } else if (strcmp(argv[i], "--size") == 0) {
-            size = atoi(argv[++i]);  // 获取向量大小
-        } else if (strcmp(argv[i], "--width") == 0) {
-            width = atoi(argv[++i]);  // 获取矩阵宽度
-        } else if (strcmp(argv[i], "--height") == 0) {
-            height = atoi(argv[++i]);  // 获取矩阵高度
+// 辅助函数，用于验证两个向量结果的正确性
+bool verify_results(const float* h_ref, const float* h_res, int n) {
+    float epsilon = 1e-5f; // 误差允许范围
+    for (int i = 0; i < n; ++i) {
+        if (std::fabs(h_ref[i] - h_res[i]) > epsilon) {
+            return false;
         }
     }
-
-    // 根据命令行参数选择测试
-    if (op == "vector_add") {
-        if (size == 0) {
-            std::cout << "Error: You must provide --size for vector_add operation.\n";
-            return 1;
-        }
-        std::cout << "Testing vector addition...\n";
-        test_vector_add(size);  // 调用向量加法测试函数
-    } else if (op == "matrix_add") {
-        if (width == 0 || height == 0) {
-            std::cout << "Error: You must provide --width and --height for matrix_add operation.\n";
-            return 1;
-        }
-        std::cout << "Testing matrix addition...\n";
-        test_matrix_add(width, height);  // 调用矩阵加法测试函数
-    } else if (op == "matrix_transpose") {
-        if (width == 0 || height == 0) {
-            std::cout << "Error: You must provide --width and --height for matrix_transpose operation.\n";
-            return 1;
-        }
-        std::cout << "Testing matrix transpose...\n";
-        test_matrix_transpose(width, height);  // 调用矩阵转置测试函数
-    } else {
-        print_help();
-        return 1;
-    }
-
-    return 0;
+    return true;
 }

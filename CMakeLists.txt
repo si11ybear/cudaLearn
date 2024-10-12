@@ -10,6 +10,7 @@ set(CMAKE_CUDA_STANDARD 11)
 
 # 包含头文件的目录（即 include 文件夹路径）
 include_directories(include)
+include_directories(/usr/local/cuda/include)
 
 # 设置可执行文件输出路径为项目根目录下的 bin/ 目录
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/bin)
@@ -29,13 +30,19 @@ target_include_directories(blasvv PUBLIC include/blasvv)
 add_library(blasvm STATIC ${SRC_BLASVM})
 target_include_directories(blasvm PUBLIC include/blasvm)
 
+find_package(CUDA REQUIRED)
+# find_package(cublas REQUIRED)
+
 # 创建一个可执行文件 main_exe
 add_executable(main_exec main.cpp)
 add_executable(test.exe src/test.cpp)
 
 # 将库链接到 main_exec 可执行文件中
 target_link_libraries(main_exec blasmm blasvv blasvm)
-target_link_libraries(test.exe blasmm blasvv blasvm)
+target_link_libraries(test.exe blasmm blasvv blasvm ${CUDA_LIRBRARIES} cublas)
 
 # 为调试目的启用详细的 Makefile 输出（可选）
 # set(CMAKE_VERBOSE_MAKEFILE ON)
+
+set(CMAKE_BUILD_TYPE Debug)
+

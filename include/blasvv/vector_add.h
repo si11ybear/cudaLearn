@@ -1,6 +1,7 @@
 #ifndef VECTOR_ADD_H
 #define VECTOR_ADD_H
 
-void vector_add(const int* h_a, const int* h_b, int* h_c, int n);
+template <typename T>
+void vector_add(const T* h_a, const T alpha, T* h_b, int n);
 
 #endif // VECTOR_ADD_H
