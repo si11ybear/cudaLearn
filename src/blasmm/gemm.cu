@@ -2,77 +2,81 @@
 #include <stdio.h>
 #include <typeinfo>
 
+// CUDA error checking macro
+#define CHECK_CUDA(call) {                                          \
+    cudaError_t err = (call);                                       \
+    if (err != cudaSuccess) {                                       \
+        fprintf(stderr, "CUDA error in file '%s' in line %i: %s.\n",\
+                __FILE__, __LINE__, cudaGetErrorString(err));       \
+        exit(EXIT_FAILURE);                                         \
+    }                                                               \
+}
+
 // Templated CUDA kernel for GEMM: C = alpha * A * B + beta * C
-template <typename T>
-__global__ void gemm_kernel(T *A, T *B, T *C, T alpha, T beta, int A_rows, int A_cols, int B_cols) {
+__global__ void gemm_kernel(float *A, float *B, float *C, float alpha, float beta, int m, int n, int k) {
     int row = blockIdx.y * blockDim.y + threadIdx.y;
     int col = blockIdx.x * blockDim.x + threadIdx.x;
 
-    if (row < A_rows && col < B_cols) {
-        T value = 0;
-        for (int k = 0; k < A_cols; k++) {
-            value += A[row * A_cols + k] * B[k * B_cols + col];
+    if (row < m && col < k) {
+        float value = 0;
+        for (int j = 0; j < n; j++) {
+            value += A[row * n + j] * B[j * k + col];
         }
-        C[row * B_cols + col] = alpha * value + beta * C[row * B_cols + col];
+        C[row * k + col] = alpha * value + beta * C[row * k + col];
     }
 }
 
 // Templated GEMM function
-template <typename T>
-void gemm(const T *h_A, const T *h_B, T *h_C, T alpha, T beta, int A_rows, int A_cols, int B_cols) {
+void gemm(const float *h_A, const float *h_B, float *h_C, float alpha, float beta, int m, int n, int k) {
     // Calculate sizes
-    int size_A = A_rows * A_cols * sizeof(T);
-    int size_B = A_cols * B_cols * sizeof(T);
-    int size_C = A_rows * B_cols * sizeof(T);
+    int size_A = m * n * sizeof(float);
+    int size_B = n * k * sizeof(float);
+    int size_C = m * k * sizeof(float);
 
     // Device memory pointers
-    T *d_A, *d_B, *d_C;
-    printf("hereadf\n");
+    float *d_A, *d_B, *d_C;
 
     // Allocate memory on the device (GPU)
-    cudaMalloc((void **)&d_A, size_A);
-    cudaMalloc((void **)&d_B, size_B);
-    cudaMalloc((void **)&d_C, size_C);
+    CHECK_CUDA(cudaMalloc((void **)&d_A, m * n * sizeof(float)));
+    CHECK_CUDA(cudaMalloc((void **)&d_B, size_B));
+    CHECK_CUDA(cudaMalloc((void **)&d_C, size_C));
 
     // Copy data from host to device
-    cudaMemcpy(d_A, h_A, size_A, cudaMemcpyHostToDevice);
-    cudaMemcpy(d_B, h_B, size_B, cudaMemcpyHostToDevice);
-    cudaMemcpy(d_C, h_C, size_C, cudaMemcpyHostToDevice);
+    CHECK_CUDA(cudaMemcpy(d_A, h_A, size_A, cudaMemcpyHostToDevice));
+    CHECK_CUDA(cudaMemcpy(d_B, h_B, size_B, cudaMemcpyHostToDevice));
+    CHECK_CUDA(cudaMemcpy(d_C, h_C, size_C, cudaMemcpyHostToDevice));
 
     // Define thread block and grid size
     dim3 blockSize(16, 16);
-    dim3 gridSize((B_cols + blockSize.x - 1) / blockSize.x, (A_rows + blockSize.y - 1) / blockSize.y);
+    dim3 gridSize((k + blockSize.x - 1) / blockSize.x, (m + blockSize.y - 1) / blockSize.y);
 
     // Create CUDA events for timing
     cudaEvent_t start, stop;
     cudaEventCreate(&start);
     cudaEventCreate(&stop);
 
-    // Start timing
-    cudaEventRecord(start, 0);
-
-    // Launch the kernel
-    gemm_kernel<<<gridSize, blockSize>>>(d_A, d_B, d_C, alpha, beta, A_rows, A_cols, B_cols);
-
-    // Stop timing
-    cudaEventRecord(stop, 0);
+    // Timing and launch the kernel
+    cudaEventRecord(start);    
+    gemm_kernel<<<gridSize, blockSize>>>(d_A, d_B, d_C, alpha, beta, m, n, k);
+    
+    cudaEventRecord(stop);
     cudaEventSynchronize(stop);
 
     // Calculate elapsed time
-    float milliseconds = 0;
-    cudaEventElapsedTime(&milliseconds, start, stop);
-    printf("Time for GEMM (DataType: %s): %f ms\n", typeid(T).name(), milliseconds);
+    float time_ms = 0.f;
+    cudaEventElapsedTime(&time_ms, start, stop);
+    printf("%f ms used.\n", time_ms);
+    long ops = (long)m * n * k * 2;
+    double gops = ((double)ops / 1e9) / ((double)time_ms / 1e3);
+    printf("My GEMM: %f Gops\n", gops);
 
     // Copy the result back to host
-    cudaMemcpy(h_C, d_C, size_C, cudaMemcpyDeviceToHost);
+    CHECK_CUDA(cudaMemcpy(h_C, d_C, size_C, cudaMemcpyDeviceToHost));
 
     // Cleanup
+    cudaEventDestroy(start);
+    cudaEventDestroy(stop);
     cudaFree(d_A);
     cudaFree(d_B);
     cudaFree(d_C);
-    cudaEventDestroy(start);
-    cudaEventDestroy(stop);
 }
-
-template void gemm<float>(const float *h_A, const float *h_B, float *h_C, float alpha, float beta, int A_rows, int A_cols, int B_cols);
-template void gemm<double>(const double *h_A, const double *h_B, double *h_C, double alpha, double beta, int A_rows, int A_cols, int B_cols);
