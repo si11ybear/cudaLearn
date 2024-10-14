@@ -27,7 +27,7 @@ __global__ void gemm_kernel(float *A, float *B, float *C, float alpha, float bet
 }
 
 // Templated GEMM function
-void gemm(const float *h_A, const float *h_B, float *h_C, float alpha, float beta, int m, int n, int k) {
+void gemm(const float *h_A, const float *h_B, float *h_C, float alpha, float beta, int m, int n, int k, int iter) {
     // Calculate sizes
     int size_A = m * n * sizeof(float);
     int size_B = n * k * sizeof(float);
@@ -55,23 +55,30 @@ void gemm(const float *h_A, const float *h_B, float *h_C, float alpha, float bet
     cudaEventCreate(&start);
     cudaEventCreate(&stop);
 
-    // Timing and launch the kernel
-    cudaEventRecord(start);    
+    //  warmup
     gemm_kernel<<<gridSize, blockSize>>>(d_A, d_B, d_C, alpha, beta, m, n, k);
-    
-    cudaEventRecord(stop);
-    cudaEventSynchronize(stop);
+    CHECK_CUDA(cudaMemcpy(h_C, d_C, size_C, cudaMemcpyDeviceToHost)); //注意回送数据的时机，现在要求beta = 0
 
-    // Calculate elapsed time
-    float time_ms = 0.f;
-    cudaEventElapsedTime(&time_ms, start, stop);
-    printf("%f ms used.\n", time_ms);
+    float time_acc = 0.f;
+    float time;
     long ops = (long)m * n * k * 2;
-    double gops = ((double)ops / 1e9) / ((double)time_ms / 1e3);
-    printf("My GEMM: %f Gops\n", gops);
-
-    // Copy the result back to host
-    CHECK_CUDA(cudaMemcpy(h_C, d_C, size_C, cudaMemcpyDeviceToHost));
+    double gops;
+    printf("My GEMM performance:\n ROUND      time          GFLOPS\n");
+    for(int i = 0; i < iter; i++){
+        cudaEventRecord(start, 0);
+        gemm_kernel<<<gridSize, blockSize>>>(d_A, d_B, d_C, alpha, beta, m, n, k);
+        cudaDeviceSynchronize(); 
+        cudaEventRecord(stop, 0);
+        cudaEventSynchronize(stop);
+        // cublasTest(status);
+        cudaEventElapsedTime(&time, start, stop);
+        time_acc += time;
+        gops = ((double)ops / 1e9) / ((double)time / 1e3);
+        printf("Round %d: %f ms | %f\n", i, time, gops);
+    }
+    time = time_acc / iter; 
+    gops = ((double)ops / 1e9) / ((double)time / 1e3);
+    printf("Average: %f ms | %f\n", time, gops);
 
     // Cleanup
     cudaEventDestroy(start);

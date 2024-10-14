@@ -15,7 +15,7 @@ void cublasTest(cublasStatus_t status);
 
 //验证正确性并进行性能对比
 void test_vector_add(int n);
-void test_gemm(int m, int n, int k);
+void test_gemm(int m, int n, int k, int iter);
 
 // 主函数：允许选择要测试的算子
 int main(int argc, char* argv[]) {
@@ -38,13 +38,14 @@ int main(int argc, char* argv[]) {
         int m = 1024;
         int n = 1024;
         int k = 1024;
+        int iter = 10;
         if (argc !=6) printf("Using default size %d * %d * %d.\n", m, n, k);
         else if (std::string(argv[2]) == "--matrix-size") {
             m = std::atoi(argv[3]);
             n = std::atoi(argv[4]);
             k = std::atoi(argv[5]);
         }
-        test_gemm(m, n, k);
+        test_gemm(m, n, k, iter);
     }
     else {
         std::cout << "Unknown operation: " << operation << "\n";
@@ -99,11 +100,11 @@ void test_vector_add(int n) {
 
     cublasTest(status);
     cublasGetVector(n, sizeof(float), d_ref, 1, h_ref, 1);
-    float time_ms = 0.f;
-    cudaEventElapsedTime(&time_ms, start, stop);
-    printf("%f ms used.\n", time_ms);
+    float time_acc = 0.f;
+    cudaEventElapsedTime(&time_acc, start, stop);
+    printf("%f ms used.\n", time_acc);
     long ops = (long)n * 2;
-    double gops = ((double)ops / 1e9) / ((double)time_ms / 1e3);
+    double gops = ((double)ops / 1e9) / ((double)time_acc / 1e3);
     printf("CUBLAS Vector ADD: %f Gops\n", gops);
 
     cublasDestroy(handle);
@@ -137,7 +138,7 @@ void test_vector_add(int n) {
     }                                                               \
 }
 // gemm 性能测试
-void test_gemm(int m, int n, int k) {
+void test_gemm(int m, int n, int k, int iter) {
     int size_A = n * m * sizeof(float);
     int size_B = n * k * sizeof(float);
     int size_C = m * k * sizeof(float);
@@ -147,8 +148,8 @@ void test_gemm(int m, int n, int k) {
     float* h_ref = (float*)malloc(size_C); // 参考结果
     float alpha = static_cast<float>(rand()) / RAND_MAX;
     float beta = static_cast<float>(rand()) / RAND_MAX;
-    alpha = beta = 1;
-
+    alpha = 1;
+    beta = 0;
     // 初始化向量
     init_matrix(m * n, h_a);
     init_matrix(n * k, h_b);
@@ -174,27 +175,43 @@ void test_gemm(int m, int n, int k) {
     cudaEvent_t start, stop;
     cudaEventCreate(&start);
     cudaEventCreate(&stop);
-
-    cudaEventRecord(start, 0);       
+    //  warmup
     status = cublasSgemm_v2(handle, CUBLAS_OP_N, CUBLAS_OP_N,
                                            k, m, n, 
                                            &alpha,
                                            d_b, k, 
                                            d_a, n, 
                                            &beta, 
-                                           d_ref, k);// h_ref = alpha * h_a + h_b
-    cudaDeviceSynchronize(); 
-    cudaEventRecord(stop, 0);
-    cudaEventSynchronize(stop);
-
+                                           d_ref, k);
     cublasTest(status);
     cublasGetVector(m * k, sizeof(float), d_ref, 1, h_ref, 1);
-    float time_ms = 0.f;
-    cudaEventElapsedTime(&time_ms, start, stop);
-    printf("%f ms used.\n", time_ms);
+
+    float time_acc = 0.f;
+    float time;
     long ops = (long)m * n * k * 2;
-    double gops = ((double)ops / 1e9) / ((double)time_ms / 1e3);
-    printf("CUBLAS GEMM: %f Gops\n", gops);
+    double gops;
+    printf("CUBLAS performance:\n ROUND      time          GFLOPS\n");
+    for(int i = 0; i < iter; i++){
+        cudaEventRecord(start, 0);
+        status = cublasSgemm_v2(handle, CUBLAS_OP_N, CUBLAS_OP_N,
+                                            k, m, n, 
+                                            &alpha,
+                                            d_b, k, 
+                                            d_a, n, 
+                                            &beta, 
+                                            d_ref, k);// h_ref = alpha * h_a + h_b
+        cudaDeviceSynchronize(); 
+        cudaEventRecord(stop, 0);
+        cudaEventSynchronize(stop);
+        // cublasTest(status);
+        cudaEventElapsedTime(&time, start, stop);
+        time_acc += time;
+        gops = ((double)ops / 1e9) / ((double)time / 1e3);
+        printf("Round %d: %f ms | %f\n", i, time, gops);
+    }
+    time = time_acc / iter; 
+    gops = ((double)ops / 1e9) / ((double)time / 1e3);
+    printf("Average: %f ms | %f\n", time, gops);
 
     cublasDestroy(handle);
     cudaEventDestroy(start);
@@ -204,7 +221,7 @@ void test_gemm(int m, int n, int k) {
     cudaFree(d_ref);
 
     // 调用自定义 CUDA gemm函数
-    gemm(h_a, h_b, h_c, alpha, beta, m, n, k);  // 我的 CUDA 实现
+    gemm(h_a, h_b, h_c, alpha, beta, m, n, k, iter);  // 我的 CUDA 实现
 
     // print_vm(h_ref, 12, 12);
     // printf("------------------------------------------\n");
@@ -212,7 +229,6 @@ void test_gemm(int m, int n, int k) {
     // 验证 CUDA 结果是否与 CBLAS 结果匹配
     printf("My CUDA gemm is %s!\n", 
             verify_results(h_ref, h_c, m * k) ? "true":"false");
-
 
     // // 清理内存
     free(h_a);
